@@ -1,46 +1,63 @@
-# CrossPoint Reader Development Guide
+# CLAUDE.md
 
-Project: Open-source e-reader firmware simulator for Xteink X4 (ESP32-C3)
-Mission: Provide a device simulator for Crosspoint firmware and its forks.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## AI Agent Identity and Cognitive Rules
+## What This Is
 
-- Role: Senior Embedded Systems Engineer (ESP-IDF/Arduino-ESP32 specialized).
-- Primary Constraint: 380KB RAM is the hard ceiling. Stability is non-negotiable.
-- Evidence-Based Reasoning: Before proposing a change, you MUST cite the specific file path and line numbers that justify the modification.
-- Anti-Hallucination: Do not assume the existence of libraries or ESP-IDF functions. If you are unsure of an API's availability for the ESP32-C3 RISC-V target, check the open-x4-sdk or official docs first.
-- No Unfounded Claims: Do not claim performance gains or memory savings without explaining the technical mechanism (e.g., DRAM vs IRAM usage).
-- Resource Justification: You must justify any new heap allocation (new, malloc, std::vector) or explain why a stack/static alternative was rejected.
-- Verification: After suggesting a fix, instruct the user on how to verify it (e.g., monitoring heap via Serial or checking a specific cache file).
+A macOS desktop simulator for CrossPoint firmware (an ESP32-C3 e-reader). PlatformIO compiles the firmware as a native binary; SDL2 renders the e-ink display in a window. The simulator lives in this repo as a library that is added to the firmware's `platformio.ini`.
 
----
-
-## Context
-
-- At the start of each session, read any existing files in `.claude/` matching `CONTEXT-*.md` to inform your understanding of the project.
-- When I say "summarize session", create a dated context file at `.claude/CONTEXT-YYYY-MM-DD.md` and populate it with relevant information, code snippets, and references to specific files/lines that will be useful for future sessions.
-
-## Development Environment Awareness
-
-**CRITICAL**: Detect the host platform at session start to choose appropriate tools and commands.
-
-### Platform Detection
+## Build & Run
 
 ```bash
-# Detect platform (run once per session)
-uname -s
-# Returns: MINGW64_NT-* (Windows Git Bash), Linux, Darwin (macOS)
+# Build
+pio run -e simulator
+
+# Run compiled binary
+.pio/build/simulator/program
+
+# Build and run (custom PlatformIO target)
+pio run -e simulator -t run_simulator
 ```
 
-**Detection Required**: Run `uname -s` at session start to determine platform
+The PlatformIO environment config lives in `sample-platformio.ini` — copy the `[env:simulator]` section into the firmware's `platformio.ini`.
 
-### Platform-Specific Behaviors
+## Architecture
 
-- **Windows (Git Bash)**: Unix commands, `C:\` paths in Windows but `/` in bash, limited glob (use `find`+`xargs`)
-- **Linux/WSL**: Full bash, Unix paths, native glob support
+All simulator mock sources are in `src/`. The entry point is `src/simulator_main.cpp`, which calls `setup()` / `loop()` from the firmware and drives the display.
 
-**Cross-Platform Code Formatting**:
+**Display pipeline** — `HalDisplay` manages an SDL2 window at half-scale (240×400 logical for the physical 800×480 framebuffer). `refreshDisplay()` converts the 1-bit framebuffer to RGBA32 pixels and sets an atomic `pendingPresent` flag. The main thread calls `presentIfNeeded()` each loop iteration (SDL must run on the main thread on macOS). SDL rotation undoes the firmware's coordinate transform:
 
-```bash
-find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
-```
+| Orientation | SDL angle |
+|---|---|
+| Portrait | +90° |
+| PortraitInverted | −90° |
+| Landscape | 0° |
+
+**Input** — `HalGPIO` polls SDL events and maps keyboard keys to device buttons:
+
+| Key | Button |
+|---|---|
+| ↑ / ↓ | Page back / forward (side buttons) |
+| ← / → | Left / right front buttons |
+| Return | Confirm |
+| Escape | Back |
+| P | Power |
+
+**Storage** — `HalStorage` wraps POSIX file descriptors (`::open`, `::read`, `::write`, `lseek`). Do **not** rewrite this layer using `std::fstream` — it has EOF/seek state bugs that are fully documented in `.claude/CONTEXT-sim-notes.md`. The virtual filesystem root is `./fs_/` relative to the binary's working directory. Place books at `./fs_/books/`.
+
+**FreeRTOS mocks** (`src/freertos/`) — `xTaskCreate` launches a `std::thread`; `ulTaskNotifyTake` / `xTaskNotify` use a `std::condition_variable`. `SemaphoreHandle_t` wraps `std::recursive_mutex`.
+
+## Key Implementation Notes
+
+- `FsApiConstants.h` passes native POSIX flag values — do **not** add SdFat→POSIX flag translation in `HalFile::Impl::open()`.
+- `BookMetadataCache::lutOffset` must be `uint32_t`, not `size_t` — the 8-byte/4-byte mismatch only manifests on the 64-bit macOS simulator.
+- Graceful exit: the main loop checks `display.shouldQuit()` (atomic bool set by SDL quit event) rather than calling `exit()`.
+- LOG output goes to `stderr` via `std::cerr` in `HardwareSerial.h`.
+
+## Stale Cache
+
+After any storage-layer changes, delete `./fs_/.crosspoint/` to clear section caches built with old code before re-testing ebook rendering.
+
+## Detailed Development History
+
+`.claude/CONTEXT-sim-notes.md` contains the full record of every build error fixed, every runtime bug fixed, and the rationale for each architectural decision. Read it before making changes to `HalDisplay`, `HalStorage`, or the FreeRTOS mocks.

@@ -25,6 +25,18 @@ void HalDisplay::setSimulatorOrientation(int o) { currentOrientation = static_ca
 HalDisplay::HalDisplay() {}
 HalDisplay::~HalDisplay() {}
 
+// X4: 4.3" panel, 800×480 buffer — display at 0.5× (400×240 window in landscape).
+// X3: 3.7" panel, 792×528 buffer — display at 0.5× (396×264 window in landscape).
+// Both use the same 0.5× scale; the different buffer dimensions already produce the
+// correctly proportioned window for each device.
+#if defined(SIMULATOR_DEVICE_X3)
+static constexpr double WINDOW_SCALE = 0.5;
+static constexpr const char* WINDOW_TITLE = "Simulator - XTEINK X3";
+#else
+static constexpr double WINDOW_SCALE = 0.5;
+static constexpr const char* WINDOW_TITLE = "Simulator - XTEINK X4";
+#endif
+
 void HalDisplay::begin() {
   if (SDL_Init(SDL_INIT_VIDEO) < 0) {
     std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
@@ -33,12 +45,12 @@ void HalDisplay::begin() {
 
   bool isPortrait =
       (currentOrientation == GfxRenderer::Portrait || currentOrientation == GfxRenderer::PortraitInverted);
-  int winW = isPortrait ? DISPLAY_HEIGHT / 2 : DISPLAY_WIDTH / 2;
-  int winH = isPortrait ? DISPLAY_WIDTH / 2 : DISPLAY_HEIGHT / 2;
+  int winW = static_cast<int>(isPortrait ? DISPLAY_HEIGHT * WINDOW_SCALE : DISPLAY_WIDTH * WINDOW_SCALE);
+  int winH = static_cast<int>(isPortrait ? DISPLAY_WIDTH * WINDOW_SCALE : DISPLAY_HEIGHT * WINDOW_SCALE);
 
   // SDL_WINDOW_ALLOW_HIGHDPI lets the renderer use full Retina/HiDPI pixels on macOS
   // so we get crisp 1:1 rendering instead of a blurry upscale.
-  window = SDL_CreateWindow("Simulator - Open-X4 SDK", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, winW, winH,
+  window = SDL_CreateWindow(WINDOW_TITLE, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, winW, winH,
                             SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
   sdl_renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
@@ -111,32 +123,30 @@ void HalDisplay::presentIfNeeded() {
   SDL_UpdateTexture(texture, nullptr, pixelBuf, DISPLAY_WIDTH * sizeof(uint32_t));
   SDL_RenderClear(sdl_renderer);
 
-  // For portrait modes the texture (800×480 landscape) must be rotated to fill the
-  // portrait window (240×400).  SDL_RenderCopyEx rotates around the *centre* of dst,
-  // so dst must be landscape-oriented (400×240) and offset so its centre coincides
-  // with the window centre (120, 200).  After rotation the result is 240×400.
-  //
-  // Portrait rotateCoordinates stores content rotated 90° CCW in the physical buffer,
-  // so we rotate +90° CW here to undo it.
+  // For portrait modes the texture (landscape 800×480) must be rotated to fill the
+  // portrait window.  SDL_RenderCopyEx rotates around the centre of dst, so dst must
+  // be landscape-oriented and offset so its centre coincides with the window centre.
+  // Portrait stores content rotated 90° CCW → undo with +90° CW.
   // PortraitInverted stores content rotated 90° CW → undo with -90°.
+  const int scaledW = static_cast<int>(DISPLAY_WIDTH * WINDOW_SCALE);
+  const int scaledH = static_cast<int>(DISPLAY_HEIGHT * WINDOW_SCALE);
+
   switch (currentOrientation) {
     case GfxRenderer::Portrait: {
-      // dst centre = window centre (120,200), landscape size 400×240
-      SDL_Rect dst = {(DISPLAY_HEIGHT - DISPLAY_WIDTH) / 4,  // -80
-                      (DISPLAY_WIDTH - DISPLAY_HEIGHT) / 4,  //  80
-                      DISPLAY_WIDTH / 2,                     // 400
-                      DISPLAY_HEIGHT / 2};                   // 240
+      // Texture is landscape (scaledW×scaledH); rotate 90° CW to fill the portrait window.
+      // dst must be landscape-oriented and centred in the portrait window so that
+      // after rotation the result fills the window exactly.
+      SDL_Rect dst = {-(scaledW - scaledH) / 2, (scaledW - scaledH) / 2, scaledW, scaledH};
       SDL_RenderCopyEx(sdl_renderer, texture, nullptr, &dst, 90.0, nullptr, SDL_FLIP_NONE);
       break;
     }
     case GfxRenderer::PortraitInverted: {
-      SDL_Rect dst = {(DISPLAY_HEIGHT - DISPLAY_WIDTH) / 4, (DISPLAY_WIDTH - DISPLAY_HEIGHT) / 4, DISPLAY_WIDTH / 2,
-                      DISPLAY_HEIGHT / 2};
+      SDL_Rect dst = {-(scaledW - scaledH) / 2, (scaledW - scaledH) / 2, scaledW, scaledH};
       SDL_RenderCopyEx(sdl_renderer, texture, nullptr, &dst, -90.0, nullptr, SDL_FLIP_NONE);
       break;
     }
     default: {
-      SDL_Rect dst = {0, 0, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2};
+      SDL_Rect dst = {0, 0, scaledW, scaledH};
       SDL_RenderCopy(sdl_renderer, texture, nullptr, &dst);
       break;
     }
