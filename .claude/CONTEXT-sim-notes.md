@@ -143,7 +143,7 @@ After any of the storage / cache fixes: `rm -rf ./fs_/.crosspoint/` to drop stal
 
 ## Known Remaining Work
 
-- SDL window size is fixed at half-scale; no runtime resize on orientation change.
+- SDL window size now follows orientation changes at present time; keep resize and `SDL_RenderSetLogicalSize` on the main-thread `presentIfNeeded()` path. The library build hook patches the common `GfxRenderer::setOrientation()` implementation so consuming repos notify `HalDisplay` without a manual source edit.
 - Thread safety relies on `std::recursive_mutex` in `RenderLock`; no broader audit.
 - `HalPowerManager::startDeepSleep` should not trigger on `WakeupReason::Other` — verify if it ever does.
 - Each new HAL method added in upstream firmware will fail to link until a matching stub is added here. Most are one-line no-ops.
