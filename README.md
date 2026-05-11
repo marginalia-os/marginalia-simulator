@@ -48,6 +48,7 @@ display.setSimulatorOrientation(static_cast<int>(o));
 ```
 
 Put that in the renderer's orientation setter after updating the renderer's own orientation state.
+By default, the simulator keeps its own `JPEGDEC`, `PNGdec`, and QRCode compatibility shims so existing firmware projects can update this library without changing their simulator environment. To test against the native decoder libraries instead, follow the opt-in comments in the sample PlatformIO files: define `CROSSPOINT_SIM_USE_NATIVE_DECODERS`, set `lib_compat_mode = off`, change simulator `lib_ignore` to `hal, WebSockets`, and add the native `PNGdec`/`JPEGDEC` dependencies. `WebSockets` is ignored only in native simulator builds because this repo supplies the host-backed `WebSocketsServer` implementation.
 
 If you only want a self-contained simulator dependency, stop there.
 
@@ -156,11 +157,13 @@ locking semantics.
 the simulator. The simulator stubs those update paths so the UI can be opened
 without flashing firmware or changing boot partitions.
 
-**Image previews**: The simulator decodes JPEG and PNG files on the host and
-renders a rough grayscale preview through the firmware's normal image callbacks.
-This is meant to make image pages and PNG sleep overlays visible while testing
-desktop flows. It does not simulate device-specific e-ink image quality,
-refresh behaviour, or memory pressure.
+**Image previews**: The default simulator shims decode JPEG and PNG files on the
+host and render a rough grayscale preview through the firmware's normal image
+callbacks. This is meant to make image pages and PNG sleep overlays visible
+while testing desktop flows. Native decoder libraries can be enabled with the
+sample config's opt-in flags when decoder compatibility matters more than the
+self-contained default. Neither mode simulates device-specific e-ink image
+quality, refresh behaviour, or memory pressure.
 
 **Cache**: On first open of an ebook, an "Indexing..." popup will appear while the section cache is built. If you see rendering issues after a code change that affects layout, delete `./fs_/.crosspoint/` to clear stale caches.
 
